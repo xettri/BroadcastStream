@@ -1,0 +1,101 @@
+###############################################################################
+# docker-compose.yml — ShopStream Streaming Microservice Stack
+#
+# Services:
+#   mediamtx   — RTMP ingest on :1935, RTSP internally on :8554
+#                Triggers on_publish.sh → curl webhook + FFmpeg ABR
+#   nginx      — Serves HLS .m3u8 + .ts files on :8080 (via shared volume)
+#   api        — Node.js/TypeScript REST API on :4000
+#                Receives MediaMTX webhooks; exposes /health + /streams
+#
+# Shared Volume:
+#   hls_data   — FFmpeg writes here; NGINX reads here (zero network overhead)
+#
+# Ports exposed to host:
+#   1935  RTMP  (OBS → MediaMTX)
+#   8080  HTTP  (HLS segments → viewer browser / CDN)
+#   4000  HTTP  (API)
+###############################################################################
+
+services:
+  # ── MediaMTX: RTMP Ingest + Stream Router ──────────────────────────────────
+  mediamtx:
+    image: bluenviron/mediamtx:latest-ffmpeg # ships with FFmpeg pre-installed
+    container_name: shopstream-mediamtx
+    restart: unless-stopped
+    ports:
+      - "1935:1935" # RTMP ingest (OBS / mobile app)
+      - "8554:8554" # RTSP (internal FFmpeg pull; block in production firewall)
+      - "9997:9997" # MediaMTX API (debugging; block in production firewall)
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro # MediaMTX config
+      - ./transcode.sh:/transcode.sh # FFmpeg ABR script
+      - ./on_publish.sh:/on_publish.sh # runOnPublish wrapper
+      - ./on_unpublish.sh:/on_unpublish.sh # runOnUnpublish callback
+      - hls_data:/var/www/hls # Shared HLS output
+    # chmod scripts before starting (volumes may not preserve execute bit)
+    entrypoint:
+      - sh
+      - -c
+      - chmod +x /transcode.sh /on_publish.sh /on_unpublish.sh && /mediamtx /mediamtx.yml
+    environment:
+      - MTX_LOGLEVEL=info
+    healthcheck:
+      test:
+        ["CMD", "wget", "-qO-", "http://localhost:9997/v3/config/global/get"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── NGINX: HLS HTTP Segment Server ─────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: shopstream-nginx
+    restart: unless-stopped
+    ports:
+      - "8080:8080" # HLS streaming endpoint for viewers / CDN origin
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro # Custom config
+      - hls_data:/var/www/hls:ro # Read HLS segments
+    depends_on:
+      mediamtx:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Node.js API ─────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: shopstream-api
+    restart: unless-stopped
+    ports:
+      - "4000:4000" # REST API: /health, /streams, /webhook/*
+    environment:
+      - PORT=4000
+      - HLS_BASE_URL=http://localhost:8080/hls # Set to CDN URL in production
+      - NODE_ENV=production
+    depends_on:
+      mediamtx:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:4000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+# ── Shared Volumes ─────────────────────────────────────────────────────────────
+volumes:
+  hls_data:
+    driver: local
+    # Production scaling: replace with NFS or S3FS for multi-node:
+    # driver_opts:
+    #   type: nfs
+    #   o: addr=<nfs-server>
+    #   device: ":/hls"

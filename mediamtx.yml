@@ -1,0 +1,51 @@
+###############################################################################
+# mediamtx.yml — MediaMTX v1.16.2 Configuration for ShopStream
+#
+# KEY NOTES for v1.16.2:
+#  - Hook fields: runOnReady / runOnNotReady  (NOT runOnPublish/runOnUnpublish)
+#  - Encryption fields are STRING enums — MUST be quoted ("no"/"optional"/"strict")
+#    bare `no` in YAML is a boolean and causes: cannot unmarshal bool into conf.alias
+#  - To accept ANY stream key, use paths.all_others (special wildcard name in v1+)
+#    pathDefaults alone does NOT accept new paths — they must be declared.
+#
+# Env vars passed to hook scripts:
+#   MTX_PATH       — stream path/key (e.g. "live/test")
+#   MTX_REMOTEADDR — publisher IP:port
+#   MTX_PROTOCOL   — protocol (rtmp, rtsp, etc.)
+###############################################################################
+
+logLevel: info
+
+# ── RTSP server (internal — FFmpeg pulls stream from MediaMTX via RTSP) ───────
+rtspAddress: ":8554"
+rtspEncryption: "no"
+rtspsAddress: ":8322"
+
+# ── RTMP server (ingest — OBS / mobile app pushes to :1935) ──────────────────
+rtmpAddress: ":1935"
+rtmpEncryption: "no"
+rtmpsAddress: ":1936"
+
+# ── Disable unused protocols ──────────────────────────────────────────────────
+hls: false # We serve HLS via NGINX, not MediaMTX's built-in
+webrtc: false
+srt: false
+
+# ── Internal REST API ─────────────────────────────────────────────────────────
+api: true
+apiAddress: ":9997"
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+# "all_others" is the MediaMTX v1+ wildcard — matches every stream path
+# that is not explicitly listed above. This is what allows OBS to push
+# rtmp://host:1935/live/test  or  rtmp://host:1935/mystream  etc.
+paths:
+  all_others:
+    # Fire when a publisher's stream is live and ready for readers.
+    # on_publish.sh: notifies the API webhook, then exec's FFmpeg ABR.
+    # MediaMTX kills this process tree when the publisher disconnects.
+    runOnReady: "/on_publish.sh"
+    runOnReadyRestart: true
+
+    # Fire when the stream ends (publisher disconnects).
+    runOnNotReady: "/on_unpublish.sh"

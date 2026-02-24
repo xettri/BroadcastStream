@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ShopStream — Live Viewer</title>
+    <meta
+      name="description"
+      content="ShopStream live shopping viewer powered by Video.js with ABR quality selection and real-time audio monitoring"
+    />
+
+    <!-- Video.js 8 — includes @videojs/http-streaming (VHS/HLS) built-in -->
+    <link href="https://vjs.zencdn.net/8.10.0/video-js.css" rel="stylesheet" />
+    <script src="https://vjs.zencdn.net/8.10.0/video.min.js"></script>
+
+    <!-- Quality level plugin: exposes ABR renditions to Video.js -->
+    <script src="https://cdn.jsdelivr.net/npm/videojs-contrib-quality-levels@4/dist/videojs-contrib-quality-levels.min.js"></script>
+
+    <!-- HLS quality selector: adds a quality menu button to the control bar -->
+    <script src="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@2/dist/videojs-hls-quality-selector.min.js"></script>
+
+    <style>
+      /* ── Design tokens ────────────────────────────────────────────────────── */
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0a0a0f;
+        --surface: #13131a;
+        --surface2: #1c1c26;
+        --border: #2a2a38;
+        --accent: #ff4757;
+        --green: #2ed573;
+        --text: #e8e8f0;
+        --muted: #6b6b80;
+        --radius: 12px;
+        --radius-sm: 8px;
+        --font: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+
+      body {
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 24px 16px;
+      }
+
+      /* ── Header ─────────────────────────────────────────────────────────── */
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 32px;
+        width: 100%;
+        max-width: 960px;
+      }
+
+      .logo {
+        font-size: 1.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, var(--accent), #ff7f8a);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.5px;
+      }
+
+      .badge {
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        background: var(--accent);
+        color: white;
+        padding: 3px 8px;
+        border-radius: 4px;
+      }
+
+      .spacer {
+        flex: 1;
+      }
+
+      /* ── Status pill ─────────────────────────────────────────────────────── */
+      #status-pill {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        color: var(--muted);
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        padding: 6px 14px;
+        transition: all 0.3s;
+      }
+      #status-pill.live {
+        color: var(--green);
+        border-color: rgba(46, 213, 115, 0.3);
+      }
+      #status-pill.connecting {
+        color: #ffa502;
+        border-color: rgba(255, 165, 2, 0.3);
+      }
+
+      .pulse {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      #status-pill.live .pulse {
+        background: var(--green);
+        animation: pulse 1.4s infinite;
+      }
+      #status-pill.connecting .pulse {
+        background: #ffa502;
+        animation: blink 0.8s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        50% {
+          transform: scale(1.4);
+          opacity: 0.7;
+        }
+      }
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.2;
+        }
+      }
+
+      /* ── Layout ──────────────────────────────────────────────────────────── */
+      .main {
+        width: 100%;
+        max-width: 960px;
+        display: grid;
+        gap: 20px;
+      }
+
+      /* ── Cards ───────────────────────────────────────────────────────────── */
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px 24px;
+      }
+
+      .card-title {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+        margin-bottom: 14px;
+      }
+
+      .connect-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .input-group {
+        flex: 1;
+        min-width: 200px;
+      }
+
+      .input-group label {
+        display: block;
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--muted);
+        margin-bottom: 6px;
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+      }
+
+      .input-group input {
+        width: 100%;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 0.9rem;
+        padding: 10px 14px;
+        outline: none;
+        transition: border-color 0.2s;
+        font-family: "Courier New", monospace;
+      }
+      .input-group input:focus {
+        border-color: var(--accent);
+      }
+
+      .btn {
+        border: none;
+        border-radius: var(--radius-sm);
+        font-weight: 700;
+        font-size: 0.9rem;
+        cursor: pointer;
+        padding: 12px 24px;
+        transition: all 0.2s;
+        align-self: flex-end;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, var(--accent), #e8354a);
+        color: white;
+      }
+      .btn-primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(255, 71, 87, 0.35);
+      }
+      .btn-secondary {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      /* ── Video.js theme override ─────────────────────────────────────────── */
+      /* Wrap video-js in our rounded card border */
+      .player-card {
+        border-radius: var(--radius);
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: #000;
+        position: relative;
+      }
+
+      /* Make the player fill its container */
+      .video-js {
+        width: 100% !important;
+        height: auto !important;
+        aspect-ratio: 16 / 9;
+      }
+
+      /* Accent colour for progress bar, buttons */
+      .video-js .vjs-play-progress,
+      .video-js .vjs-volume-level {
+        background: var(--accent);
+      }
+
+      .video-js .vjs-big-play-button {
+        background: rgba(255, 71, 87, 0.85);
+        border-color: transparent;
+        border-radius: 50%;
+        width: 64px;
+        height: 64px;
+        line-height: 64px;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        margin: 0;
+        transition:
+          transform 0.2s,
+          background 0.2s;
+      }
+      .video-js:hover .vjs-big-play-button {
+        transform: translate(-50%, -50%) scale(1.08);
+      }
+
+      /* Live badge in control bar */
+      .video-js .vjs-live-display {
+        color: var(--accent);
+        font-weight: 700;
+      }
+
+      /* Quality selector button color */
+      .vjs-hls-quality-selector .vjs-menu-item.vjs-selected {
+        color: var(--accent);
+      }
+
+      /* ── Stats bar ───────────────────────────────────────────────────────── */
+      .stats-bar {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .stat-chip {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 12px;
+        font-size: 0.75rem;
+        color: var(--muted);
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
+      .stat-chip span {
+        color: var(--text);
+        font-weight: 600;
+        font-variant-numeric: tabular-nums;
+      }
+
+      /* ── Active streams list ─────────────────────────────────────────────── */
+      #streams-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .stream-item {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 12px 16px;
+        cursor: pointer;
+        transition: all 0.2s;
+      }
+      .stream-item:hover {
+        border-color: var(--accent);
+        background: rgba(255, 71, 87, 0.06);
+      }
+
+      .stream-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--green);
+        flex-shrink: 0;
+        animation: pulse 1.4s infinite;
+      }
+      .stream-key {
+        font-weight: 600;
+        font-family: monospace;
+        font-size: 0.9rem;
+      }
+      .stream-meta {
+        font-size: 0.75rem;
+        color: var(--muted);
+      }
+      .stream-play {
+        margin-left: auto;
+        font-size: 0.75rem;
+        color: var(--accent);
+        font-weight: 600;
+      }
+
+      .empty-state {
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.85rem;
+        padding: 24px;
+      }
+
+      /* ── Info grid ───────────────────────────────────────────────────────── */
+      .info-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 12px;
+      }
+
+      .info-box {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 14px 16px;
+      }
+      .info-box .lbl {
+        font-size: 0.7rem;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      .info-box .val {
+        font-size: 1.2rem;
+        font-weight: 700;
+      }
+      .info-box .val.green {
+        color: var(--green);
+      }
+      .info-box .val.yellow {
+        color: #ffa502;
+      }
+      .info-box .dsc {
+        font-size: 0.72rem;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+
+      /* ── Error toast ─────────────────────────────────────────────────────── */
+      #error-toast {
+        display: none;
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        background: #2d1a1a;
+        border: 1px solid var(--accent);
+        color: var(--text);
+        border-radius: var(--radius-sm);
+        padding: 12px 18px;
+        font-size: 0.85rem;
+        max-width: 320px;
+        z-index: 999;
+        animation: slideIn 0.3s ease;
+      }
+      @keyframes slideIn {
+        from {
+          transform: translateY(10px);
+          opacity: 0;
+        }
+        to {
+          transform: translateY(0);
+          opacity: 1;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- ── Header ──────────────────────────────────────────────────────────────── -->
+    <header>
+      <div class="logo">ShopStream</div>
+      <div class="badge">LIVE</div>
+      <div class="spacer"></div>
+      <div id="status-pill">
+        <div class="pulse"></div>
+        <span id="status-text">Idle</span>
+      </div>
+    </header>
+
+    <div class="main">
+      <!-- ── Connect Card ─────────────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title">Connect to Stream</div>
+        <div class="connect-row">
+          <div class="input-group">
+            <label for="hls-server">HLS Server</label>
+            <input
+              id="hls-server"
+              type="text"
+              value="http://localhost:8080/hls"
+            />
+          </div>
+          <div class="input-group">
+            <label for="stream-key">Stream Key</label>
+            <input id="stream-key" type="text" value="test" />
+          </div>
+          <button
+            class="btn btn-primary"
+            id="btn-play"
+            onclick="connectStream()"
+          >
+            ▶ Watch Live
+          </button>
+          <button
+            class="btn btn-secondary"
+            id="btn-stop"
+            onclick="stopStream()"
+            style="display: none"
+          >
+            ■ Stop
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Video.js Player ───────────────────────────────────────────────────── -->
+      <div class="player-card">
+        <!--
+      data-setup='{}' is required for Video.js auto-setup.
+      We pass additional config in JS for better control.
+      muted is required for browser autoplay — user unmutes via the control bar.
+    -->
+        <video
+          id="shopstream-player"
+          class="video-js vjs-default-skin vjs-big-play-centered"
+          controls
+          autoplay
+          muted
+          playsinline
+          preload="auto"
+        ></video>
+      </div>
+
+      <!-- ── Stats Bar ─────────────────────────────────────────────────────────── -->
+      <div class="stats-bar">
+        <div class="stat-chip">🕒 Latency <span id="stat-latency">—</span></div>
+        <div class="stat-chip">🎞 Buffer <span id="stat-buffer">—</span></div>
+        <div class="stat-chip">📶 Bandwidth <span id="stat-bw">—</span></div>
+        <div class="stat-chip">
+          🎬 Quality <span id="stat-quality">Auto</span>
+        </div>
+      </div>
+
+      <!-- ── Active Streams (API) ──────────────────────────────────────────────── -->
+      <div class="card">
+        <div
+          class="card-title"
+          style="display: flex; justify-content: space-between"
+        >
+          Active Streams
+          <button
+            class="btn btn-secondary"
+            style="padding: 4px 12px; font-size: 0.75rem"
+            onclick="fetchStreams()"
+          >
+            ↺ Refresh
+          </button>
+        </div>
+        <div id="streams-list">
+          <div class="empty-state">
+            Click Refresh to load active streams from the API
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Architecture Info ─────────────────────────────────────────────────── -->
+      <div class="card">
+        <div class="card-title">Architecture &amp; Latency Breakdown</div>
+        <div class="info-grid">
+          <div class="info-box">
+            <div class="lbl">Player</div>
+            <div class="val green">Video.js 8</div>
+            <div class="dsc">+ VHS (HLS) + quality selector</div>
+          </div>
+          <div class="info-box">
+            <div class="lbl">Segment Size</div>
+            <div class="val green">1s</div>
+            <div class="dsc">HLS fragment (vs 6s default)</div>
+          </div>
+          <div class="info-box">
+            <div class="lbl">Encoding Delay</div>
+            <div class="val green">~100ms</div>
+            <div class="dsc">FFmpeg ultrafast + zerolatency</div>
+          </div>
+          <div class="info-box">
+            <div class="lbl">ABR Renditions</div>
+            <div class="val green">4×</div>
+            <div class="dsc">1080p / 720p / 480p / 360p</div>
+          </div>
+          <div class="info-box">
+            <div class="lbl">Glass-to-Glass</div>
+            <div class="val yellow">~2–4s</div>
+            <div class="dsc">LL-HLS + VHS low-latency mode</div>
+          </div>
+          <div class="info-box">
+            <div class="lbl">Scale Target</div>
+            <div class="val green">10k+</div>
+            <div class="dsc">Via Cloudflare CDN</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="error-toast"></div>
+
+    <script>
+      // ── Constants ──────────────────────────────────────────────────────────────
+      const API_URL = "http://localhost:4000";
+
+      let player = null; // Video.js instance
+      let statsInterval = null;
+      let audioCtx = null; // Web Audio API context for VU meter
+      let analyser = null;
+      let vuRafId = null;
+
+      // ── Init Video.js player ───────────────────────────────────────────────────
+      // Called once on page load — we create the player without a source.
+      // Video.js handles HLS natively via @videojs/http-streaming (VHS).
+      function initPlayer() {
+        player = videojs("shopstream-player", {
+          // Use the built-in dark skin
+          fluid: true, // responsive aspect ratio
+
+          // Live UI: shows a "LIVE" indicator + seek-to-live button
+          liveui: true,
+
+          // HTML5 / VHS options for low-latency HLS
+          html5: {
+            vhs: {
+              // Low-latency mode — minimal playlist hold-back
+              lowLatencyMode: true,
+              // Override MIME type detection for m3u8
+              overrideNative: true,
+              // Allow cross-origin requests
+              allowSeeksWithinUnsafeLiveWindow: true,
+              // Limit back-buffer to reduce memory usage
+              backBufferLength: 30,
+            },
+            nativeVideoTracks: false,
+            nativeAudioTracks: false,
+            nativeTextTracks: false,
+          },
+
+          // Control bar layout
+          controlBar: {
+            children: [
+              "playToggle",
+              "volumePanel",
+              "currentTimeDisplay",
+              "timeDivider",
+              "durationDisplay",
+              "progressControl",
+              "liveDisplay",
+              "seekToLive",
+              "remainingTimeDisplay",
+              "customControlSpacer",
+              "playbackRateMenuButton",
+              "chaptersButton",
+              "descriptionsButton",
+              "subsCapsButton",
+              "audioTrackButton",
+              "fullscreenToggle",
+              // Quality selector is injected by the plugin after init
+            ],
+          },
+        });
+
+        // Register quality selector plugin (adds ⚙ button to control bar)
+        player.hlsQualitySelector({ displayCurrentQuality: true });
+
+        // Event hooks
+        player.on("playing", () => {
+          setStatus("live", "LIVE");
+          document.getElementById("btn-play").style.display = "none";
+          document.getElementById("btn-stop").style.display = "";
+          initVU();
+        });
+
+        player.on("waiting", () => setStatus("connecting", "Buffering…"));
+        player.on("error", () => {
+          const err = player.error();
+          showError(`Player error: ${err ? err.message : "unknown"}`);
+        });
+
+        // Volume change → restart VU meter if unmuted
+        player.on("volumechange", () => {
+          if (!player.muted() && audioCtx && audioCtx.state === "suspended") {
+            audioCtx.resume();
+          }
+          document.getElementById("vu-note").textContent = player.muted()
+            ? "Unmute in player to activate"
+            : "";
+        });
+
+        // Quality level change → update stat chip
+        const qualityLevels = player.qualityLevels();
+        qualityLevels.on("change", () => {
+          const idx = qualityLevels.selectedIndex;
+          if (idx >= 0) {
+            const lvl = qualityLevels[idx];
+            document.getElementById("stat-quality").textContent = lvl
+              ? `${lvl.height}p`
+              : "Auto";
+          }
+        });
+      }
+
+      // ── Connect stream ─────────────────────────────────────────────────────────
+      function connectStream() {
+        const server = document
+          .getElementById("hls-server")
+          .value.trim()
+          .replace(/\/$/, "");
+        const key = document.getElementById("stream-key").value.trim();
+
+        if (!key) {
+          showError("Please enter a stream key");
+          return;
+        }
+
+        const url = `${server}/${key}/master.m3u8`;
+
+        if (!player) initPlayer();
+
+        setStatus("connecting", "Connecting…");
+
+        // Load source into Video.js — VHS detects m3u8 and handles HLS automatically
+        player.src({ src: url, type: "application/x-mpegURL" });
+        player.play();
+
+        // Start stats polling
+        if (statsInterval) clearInterval(statsInterval);
+        statsInterval = setInterval(updateStats, 1000);
+      }
+
+      // ── Stop stream ────────────────────────────────────────────────────────────
+      function stopStream() {
+        if (player) {
+          player.pause();
+          player.src(""); // clear source
+        }
+        if (statsInterval) {
+          clearInterval(statsInterval);
+          statsInterval = null;
+        }
+        teardownVU();
+
+        setStatus("idle", "Idle");
+        document.getElementById("btn-play").style.display = "";
+        document.getElementById("btn-stop").style.display = "none";
+        ["stat-latency", "stat-buffer", "stat-bw"].forEach((id) => {
+          document.getElementById(id).textContent = "—";
+        });
+        document.getElementById("stat-quality").textContent = "Auto";
+      }
+
+      // ── Live stats polling ─────────────────────────────────────────────────────
+      function updateStats() {
+        if (!player) return;
+
+        // VHS (Video.js HLS) exposes stats via player.tech().vhs
+        try {
+          const vhs = player.tech(true)?.vhs;
+          const stats = vhs?.stats;
+
+          // Latency to live edge
+          if (vhs?.liveWindowStart !== undefined && player.currentTime) {
+            const duration = player.duration();
+            const current = player.currentTime();
+            if (isFinite(duration) && duration > 0) {
+              const latency = duration - current;
+              const el = document.getElementById("stat-latency");
+              el.textContent = `${latency.toFixed(1)}s`;
+              el.style.color =
+                latency < 4
+                  ? "var(--green)"
+                  : latency < 8
+                    ? "#ffa502"
+                    : "var(--accent)";
+            }
+          }
+
+          // Buffered ahead
+          const buffered = player.buffered();
+          if (buffered && buffered.length > 0) {
+            const ahead =
+              buffered.end(buffered.length - 1) - player.currentTime();
+            document.getElementById("stat-buffer").textContent =
+              `${Math.max(0, ahead).toFixed(1)}s`;
+          }
+
+          // Bandwidth from VHS stats
+          if (stats?.bandwidth) {
+            const mbps = (stats.bandwidth / 1_000_000).toFixed(2);
+            document.getElementById("stat-bw").textContent = `${mbps} Mbps`;
+          }
+        } catch (_) {
+          /* tech not ready yet */
+        }
+      }
+
+      // ── Web Audio VU meter ─────────────────────────────────────────────────────
+      // Video.js has no built-in audio analyser, so we tap the <video> element
+      // directly with the Web Audio API. Must be after a user gesture (play click).
+      function initVU() {
+        const videoEl =
+          document.getElementById("shopstream-player_html5_api") ??
+          document.querySelector("#shopstream-player video");
+        if (!videoEl || audioCtx) return;
+
+        try {
+          audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+          const src = audioCtx.createMediaElementSource(videoEl);
+          analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 256;
+          analyser.smoothingTimeConstant = 0.8;
+          src.connect(analyser);
+          analyser.connect(audioCtx.destination);
+          document.getElementById("vu-note").textContent = "";
+          drawVU();
+        } catch (e) {
+          console.warn("[VU] AudioContext init failed:", e);
+        }
+      }
+
+      function drawVU() {
+        vuRafId = requestAnimationFrame(drawVU);
+        if (!analyser) return;
+
+        const canvas = document.getElementById("vu-canvas");
+        const ctx = canvas.getContext("2d");
+        const W = canvas.width,
+          H = canvas.height;
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        analyser.getByteFrequencyData(data);
+
+        let sum = 0;
+        for (let i = 0; i < data.length; i++) sum += (data[i] / 255) ** 2;
+        const level = Math.sqrt(sum / data.length);
+
+        ctx.clearRect(0, 0, W, H);
+
+        const BARS = 30,
+          gap = 2;
+        const bw = (W - gap * (BARS - 1)) / BARS;
+        const filled = Math.round(level * BARS * 3);
+
+        for (let i = 0; i < BARS; i++) {
+          const pct = i / BARS;
+          const colour =
+            pct < 0.6 ? "#2ed573" : pct < 0.85 ? "#ffa502" : "#ff4757";
+          ctx.fillStyle = i < filled ? colour : "rgba(255,255,255,0.06)";
+          ctx.beginPath();
+          ctx.roundRect(i * (bw + gap), 0, bw, H, 2);
+          ctx.fill();
+        }
+      }
+
+      function teardownVU() {
+        if (vuRafId) {
+          cancelAnimationFrame(vuRafId);
+          vuRafId = null;
+        }
+        if (audioCtx) {
+          audioCtx.close();
+          audioCtx = null;
+          analyser = null;
+        }
+        const canvas = document.getElementById("vu-canvas");
+        canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+        document.getElementById("vu-note").textContent =
+          "Unmute in player to activate";
+      }
+
+      // ── Active streams from API ────────────────────────────────────────────────
+      async function fetchStreams() {
+        const container = document.getElementById("streams-list");
+        container.innerHTML = '<div class="empty-state">Loading…</div>';
+
+        try {
+          const res = await fetch(`${API_URL}/streams`);
+          const json = await res.json();
+          const streams = json.data?.streams ?? [];
+
+          if (!streams.length) {
+            container.innerHTML =
+              '<div class="empty-state">No active streams. Start publishing via OBS.</div>';
+            return;
+          }
+
+          container.innerHTML = streams
+            .map((s) => {
+              const age = Math.floor(
+                (Date.now() - new Date(s.startedAt).getTime()) / 1000,
+              );
+              const dur =
+                age < 60 ? `${age}s` : `${Math.floor(age / 60)}m ${age % 60}s`;
+              return `
+        <div class="stream-item" onclick="playStreamFromList('${esc(s.streamKey)}')">
+          <div class="stream-dot"></div>
+          <div>
+            <div class="stream-key">${esc(s.streamKey)}</div>
+            <div class="stream-meta">Live ${dur} · ${s.qualities.length} qualities · ${esc(s.clientIp)}</div>
+          </div>
+          <div class="stream-play">▶ Watch</div>
+        </div>`;
+            })
+            .join("");
+        } catch (_) {
+          container.innerHTML =
+            '<div class="empty-state">API unreachable — is the stack running?</div>';
+        }
+      }
+
+      function playStreamFromList(key) {
+        document.getElementById("stream-key").value = key;
+        connectStream();
+      }
+
+      // ── Helpers ────────────────────────────────────────────────────────────────
+      function setStatus(state, text) {
+        const pill = document.getElementById("status-pill");
+        pill.className = state;
+        document.getElementById("status-text").textContent = text;
+      }
+
+      function showError(msg) {
+        const t = document.getElementById("error-toast");
+        t.textContent = "⚠ " + msg;
+        t.style.display = "block";
+        setTimeout(() => {
+          t.style.display = "none";
+        }, 5000);
+      }
+
+      function esc(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c] ?? c,
+        );
+      }
+
+      // Auto-fetch streams on load
+      window.addEventListener("DOMContentLoaded", fetchStreams);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,48 @@
+###############################################################################
+# Dockerfile.api — ShopStream Node.js API
+#
+# Multi-stage build:
+#   Stage 1 (builder): Install deps + compile TypeScript → dist/
+#   Stage 2 (runner):  Copy only compiled JS + prod deps → lean image
+###############################################################################
+
+# ── Stage 1: Builder ─────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+# Copy dependency manifests first (better layer caching)
+COPY package*.json tsconfig.json ./
+
+# Install ALL deps (including devDeps for tsc)
+RUN npm ci
+
+# Copy source
+COPY src/ ./src/
+
+# Compile TypeScript → dist/
+RUN npm run build
+
+# ── Stage 2: Runner ───────────────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+WORKDIR /app
+
+# Copy manifest for prod install
+COPY package*.json ./
+
+# Install ONLY production dependencies
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Copy compiled output from builder
+COPY --from=builder /app/dist ./dist
+
+# Expose API port
+EXPOSE 4000
+
+# Health check for Docker Compose / orchestrators
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+  CMD wget -qO- http://localhost:4000/health || exit 1
+
+# Run the compiled API
+CMD ["node", "dist/index.js"]
