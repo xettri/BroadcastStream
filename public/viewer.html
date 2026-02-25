@@ -568,6 +568,9 @@
         initPlayer();
         fetchStreams();
 
+        // Refresh stream list every 10 seconds
+        setInterval(fetchStreams, 10000);
+
         // Auto-connect if key is in URL (?key=myshow)
         const params = new URLSearchParams(window.location.search);
         const key = params.get("key");
@@ -731,6 +734,7 @@
         try {
           const vhs = player.tech(true)?.vhs;
           const stats = vhs?.stats;
+          let latency = -1;
 
           // Calculate latency using three potential sources of truth:
           // 1. Video.js liveTracker (High-level API)
@@ -874,7 +878,7 @@
 
           if (!streams.length) {
             container.innerHTML =
-              '<div class="empty-state">No active streams. Start publishing via OBS.</div>';
+              '<div class="empty-state">No active sessions. Start publishing via OBS or the Broadcaster page.</div>';
             return;
           }
 

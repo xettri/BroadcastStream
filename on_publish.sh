@@ -24,6 +24,23 @@ STREAM_KEY="${RAW_PATH#live/}"
 
 echo "[on_publish] Stream ready: path=${RAW_PATH} key=${STREAM_KEY} from=${REMOTE_ADDR}"
 
+# Launch FFmpeg ABR in the background (or background the waiting process)
+/transcode.sh "${RAW_PATH}" "${STREAM_KEY}" &
+TRANSCODER_PID=$!
+
+# Wait for master.m3u8 to appear (approx 1-3 seconds)
+# This prevents the viewer from fetching an empty stream when they click "Watch"
+echo "[on_publish] Waiting for master.m3u8..."
+MAX_WAIT=10
+t=0
+while [ $t -lt $MAX_WAIT ]; do
+  if [ -f "/var/www/hls/${STREAM_KEY}/master.m3u8" ]; then
+    break
+  fi
+  sleep 1
+  t=$((t+1))
+done
+
 # Notify API webhook (use wget — curl not available in Alpine MediaMTX image)
 wget -qO- \
   --post-data="name=${STREAM_KEY}&remoteAddr=${REMOTE_ADDR}&proto=${PROTOCOL}" \
@@ -31,5 +48,5 @@ wget -qO- \
   && echo "[on_publish] API webhook OK" \
   || echo "[on_publish] WARNING: API webhook failed (stream continues)"
 
-# Launch FFmpeg ABR (blocks; MediaMTX kills this process on stream end)
-exec /transcode.sh "${RAW_PATH}" "${STREAM_KEY}"
+# Wait for transcoder to finish
+wait $TRANSCODER_PID

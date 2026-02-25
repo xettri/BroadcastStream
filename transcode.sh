@@ -11,7 +11,8 @@ if [ -z "${STREAM_KEY}" ]; then
 fi
 
 HLS_ROOT="/var/www/hls"
-RTSP_INPUT="rtsp://localhost:8554/${RTSP_PATH}"
+# Force TCP for internal relay to avoid UDP packet loss within Docker
+RTSP_INPUT="rtsp://localhost:8554/${RTSP_PATH}?transport=tcp"
 OUT_DIR="${HLS_ROOT}/${STREAM_KEY}"
 
 echo "[transcode] Starting: key=${STREAM_KEY} input=${RTSP_INPUT}"
@@ -61,7 +62,7 @@ ffmpeg \
     -b:v:0 0 -crf 23 -maxrate:v:0 4500k -bufsize:v:0 8000k \
     -c:a:0 aac -b:a:0 192k -ar 48000 \
     -f hls -hls_time 1 -hls_list_size 10 \
-    -hls_flags "delete_segments+independent_segments+append_list" \
+    -hls_flags "delete_segments+independent_segments" \
     -hls_segment_filename "${OUT_DIR}/1080p/%04d.ts" \
     "${OUT_DIR}/1080p/index.m3u8" \
   -map "[v2out]" -map "a:0" \
@@ -70,7 +71,7 @@ ffmpeg \
     -b:v:1 0 -crf 23 -maxrate:v:1 2500k -bufsize:v:1 5000k \
     -c:a:1 aac -b:a:1 128k -ar 48000 \
     -f hls -hls_time 1 -hls_list_size 10 \
-    -hls_flags "delete_segments+independent_segments+append_list" \
+    -hls_flags "delete_segments+independent_segments" \
     -hls_segment_filename "${OUT_DIR}/720p/%04d.ts" \
     "${OUT_DIR}/720p/index.m3u8" \
   -map "[v3out]" -map "a:0" \
@@ -79,7 +80,7 @@ ffmpeg \
     -b:v:2 0 -crf 23 -maxrate:v:2 1200k -bufsize:v:2 2400k \
     -c:a:2 aac -b:a:2 96k -ar 48000 \
     -f hls -hls_time 1 -hls_list_size 10 \
-    -hls_flags "delete_segments+independent_segments+append_list" \
+    -hls_flags "delete_segments+independent_segments" \
     -hls_segment_filename "${OUT_DIR}/480p/%04d.ts" \
     "${OUT_DIR}/480p/index.m3u8" \
   -map "[v4out]" -map "a:0" \
@@ -88,7 +89,7 @@ ffmpeg \
     -b:v:3 0 -crf 23 -maxrate:v:3 600k -bufsize:v:3 1200k \
     -c:a:3 aac -b:a:3 64k -ar 48000 \
     -f hls -hls_time 1 -hls_list_size 10 \
-    -hls_flags "delete_segments+independent_segments+append_list" \
+    -hls_flags "delete_segments+independent_segments" \
     -hls_segment_filename "${OUT_DIR}/360p/%04d.ts" \
     "${OUT_DIR}/360p/index.m3u8"
 
