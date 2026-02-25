@@ -3,10 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ShopStream — Live Viewer</title>
+    <title>BroadcastStream — Live Viewer</title>
     <meta
       name="description"
-      content="ShopStream live shopping viewer powered by Video.js with ABR quality selection and real-time audio monitoring"
+      content="BroadcastStream live shopping viewer powered by Video.js with ABR quality selection and real-time audio monitoring"
     />
 
     <!-- Video.js 8 — includes @videojs/http-streaming (VHS/HLS) built-in -->
@@ -20,7 +20,6 @@
     <script src="https://cdn.jsdelivr.net/npm/videojs-hls-quality-selector@2/dist/videojs-hls-quality-selector.min.js"></script>
 
     <style>
-      /* ── Design tokens ────────────────────────────────────────────────────── */
       *,
       *::before,
       *::after {
@@ -54,7 +53,6 @@
         padding: 24px 16px;
       }
 
-      /* ── Header ─────────────────────────────────────────────────────────── */
       header {
         display: flex;
         align-items: center;
@@ -89,7 +87,6 @@
         flex: 1;
       }
 
-      /* ── Status pill ─────────────────────────────────────────────────────── */
       #status-pill {
         display: flex;
         align-items: center;
@@ -148,7 +145,6 @@
         }
       }
 
-      /* ── Layout ──────────────────────────────────────────────────────────── */
       .main {
         width: 100%;
         max-width: 960px;
@@ -156,7 +152,6 @@
         gap: 20px;
       }
 
-      /* ── Cards ───────────────────────────────────────────────────────────── */
       .card {
         background: var(--surface);
         border: 1px solid var(--border);
@@ -238,7 +233,6 @@
         color: var(--accent);
       }
 
-      /* ── Video.js theme override ─────────────────────────────────────────── */
       /* Wrap video-js in our rounded card border */
       .player-card {
         border-radius: var(--radius);
@@ -291,7 +285,6 @@
         color: var(--accent);
       }
 
-      /* ── Stats bar ───────────────────────────────────────────────────────── */
       .stats-bar {
         display: flex;
         align-items: center;
@@ -316,7 +309,6 @@
         font-variant-numeric: tabular-nums;
       }
 
-      /* ── Active streams list ─────────────────────────────────────────────── */
       #streams-list {
         display: grid;
         gap: 10px;
@@ -369,7 +361,6 @@
         padding: 24px;
       }
 
-      /* ── Info grid ───────────────────────────────────────────────────────── */
       .info-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
@@ -405,7 +396,6 @@
         margin-top: 4px;
       }
 
-      /* ── Error toast ─────────────────────────────────────────────────────── */
       #error-toast {
         display: none;
         position: fixed;
@@ -435,9 +425,8 @@
   </head>
 
   <body>
-    <!-- ── Header ──────────────────────────────────────────────────────────────── -->
     <header>
-      <div class="logo">ShopStream</div>
+      <div class="logo">BroadcastStream</div>
       <div class="badge">LIVE</div>
       <div class="spacer"></div>
       <div id="status-pill">
@@ -447,7 +436,6 @@
     </header>
 
     <div class="main">
-      <!-- ── Connect Card ─────────────────────────────────────────────────────── -->
       <div class="card">
         <div class="card-title">Connect to Stream</div>
         <div class="connect-row">
@@ -456,7 +444,7 @@
             <input
               id="hls-server"
               type="text"
-              value="http://localhost:8080/hls"
+              placeholder="http://localhost:8080/hls"
             />
           </div>
           <div class="input-group">
@@ -481,7 +469,6 @@
         </div>
       </div>
 
-      <!-- ── Video.js Player ───────────────────────────────────────────────────── -->
       <div class="player-card">
         <!--
       data-setup='{}' is required for Video.js auto-setup.
@@ -489,7 +476,7 @@
       muted is required for browser autoplay — user unmutes via the control bar.
     -->
         <video
-          id="shopstream-player"
+          id="broadcaststream-player"
           class="video-js vjs-default-skin vjs-big-play-centered"
           controls
           autoplay
@@ -499,7 +486,6 @@
         ></video>
       </div>
 
-      <!-- ── Stats Bar ─────────────────────────────────────────────────────────── -->
       <div class="stats-bar">
         <div class="stat-chip">🕒 Latency <span id="stat-latency">—</span></div>
         <div class="stat-chip">🎞 Buffer <span id="stat-buffer">—</span></div>
@@ -509,7 +495,6 @@
         </div>
       </div>
 
-      <!-- ── Active Streams (API) ──────────────────────────────────────────────── -->
       <div class="card">
         <div
           class="card-title"
@@ -531,7 +516,6 @@
         </div>
       </div>
 
-      <!-- ── Architecture Info ─────────────────────────────────────────────────── -->
       <div class="card">
         <div class="card-title">Architecture &amp; Latency Breakdown</div>
         <div class="info-grid">
@@ -572,20 +556,36 @@
     <div id="error-toast"></div>
 
     <script>
-      // ── Constants ──────────────────────────────────────────────────────────────
-      const API_URL = "http://localhost:4000";
+      // Initialize API endpoint based on where the page is currently hosted.
+      // This allows the viewer to work locally, via IP, or through a tunnel.
+      const API_URL = window.location.origin + "/api";
 
-      let player = null; // Video.js instance
+      window.addEventListener("DOMContentLoaded", () => {
+        // Point to the local HLS gateway by default.
+        const input = document.getElementById("hls-server");
+        input.value = window.location.origin + "/hls";
+
+        initPlayer();
+        fetchStreams();
+
+        // Auto-connect if key is in URL (?key=myshow)
+        const params = new URLSearchParams(window.location.search);
+        const key = params.get("key");
+        if (key) {
+          document.getElementById("stream-key").value = key;
+          setTimeout(connectStream, 500); // Small delay for player init
+        }
+      });
+
+      let player = null;
       let statsInterval = null;
-      let audioCtx = null; // Web Audio API context for VU meter
+      let audioCtx = null;
       let analyser = null;
       let vuRafId = null;
 
-      // ── Init Video.js player ───────────────────────────────────────────────────
-      // Called once on page load — we create the player without a source.
-      // Video.js handles HLS natively via @videojs/http-streaming (VHS).
+      // Initialize Video.js
       function initPlayer() {
-        player = videojs("shopstream-player", {
+        player = videojs("broadcaststream-player", {
           // Use the built-in dark skin
           fluid: true, // responsive aspect ratio
 
@@ -595,14 +595,14 @@
           // HTML5 / VHS options for low-latency HLS
           html5: {
             vhs: {
-              // Low-latency mode — minimal playlist hold-back
               lowLatencyMode: true,
-              // Override MIME type detection for m3u8
+              liveSyncDurationCount: 2,
+              liveMaxLatencyDurationCount: 4,
+              GOAL_BUFFER_LENGTH: 2,
+              MAX_GOAL_BUFFER_LENGTH: 4,
               overrideNative: true,
-              // Allow cross-origin requests
               allowSeeksWithinUnsafeLiveWindow: true,
-              // Limit back-buffer to reduce memory usage
-              backBufferLength: 30,
+              backBufferLength: 5,
             },
             nativeVideoTracks: false,
             nativeAudioTracks: false,
@@ -639,6 +639,10 @@
         // Event hooks
         player.on("playing", () => {
           setStatus("live", "LIVE");
+          // Force player strictly to the live edge to bypass trailing buffer delay
+          if (player.liveTracker && player.liveTracker.isLive()) {
+            player.liveTracker.seekToLiveEdge();
+          }
           document.getElementById("btn-play").style.display = "none";
           document.getElementById("btn-stop").style.display = "";
           initVU();
@@ -673,7 +677,6 @@
         });
       }
 
-      // ── Connect stream ─────────────────────────────────────────────────────────
       function connectStream() {
         const server = document
           .getElementById("hls-server")
@@ -701,7 +704,6 @@
         statsInterval = setInterval(updateStats, 1000);
       }
 
-      // ── Stop stream ────────────────────────────────────────────────────────────
       function stopStream() {
         if (player) {
           player.pause();
@@ -722,7 +724,6 @@
         document.getElementById("stat-quality").textContent = "Auto";
       }
 
-      // ── Live stats polling ─────────────────────────────────────────────────────
       function updateStats() {
         if (!player) return;
 
@@ -731,21 +732,44 @@
           const vhs = player.tech(true)?.vhs;
           const stats = vhs?.stats;
 
-          // Latency to live edge
-          if (vhs?.liveWindowStart !== undefined && player.currentTime) {
-            const duration = player.duration();
-            const current = player.currentTime();
-            if (isFinite(duration) && duration > 0) {
-              const latency = duration - current;
-              const el = document.getElementById("stat-latency");
-              el.textContent = `${latency.toFixed(1)}s`;
-              el.style.color =
-                latency < 4
-                  ? "var(--green)"
-                  : latency < 8
-                    ? "#ffa502"
-                    : "var(--accent)";
-            }
+          // Calculate latency using three potential sources of truth:
+          // 1. Video.js liveTracker (High-level API)
+          if (player.liveTracker && player.liveTracker.isLive()) {
+            latency =
+              player.liveTracker.liveCurrentTime() - player.currentTime();
+          }
+
+          // 2. Browser seekable range (Direct buffer metadata)
+          if (
+            (latency < 0 || !isFinite(latency)) &&
+            player.seekable().length > 0
+          ) {
+            const edge = player.seekable().end(player.seekable().length - 1);
+            if (isFinite(edge)) latency = edge - player.currentTime();
+          }
+
+          // 3. VHS playlist segment data (Raw HLS metadata - Source of Truth)
+          if (latency < 0 || !isFinite(latency)) {
+            try {
+              const segs = vhs?.playlists?.media()?.segments;
+              if (segs && segs.length > 0) {
+                const lastEnd = segs[segs.length - 1].end;
+                latency = lastEnd - player.currentTime();
+              }
+            } catch (e) {}
+          }
+
+          const el = document.getElementById("stat-latency");
+          if (latency >= 0 && isFinite(latency)) {
+            el.textContent = `${latency.toFixed(1)}s`;
+            el.style.color =
+              latency < 4
+                ? "var(--green)"
+                : latency < 8
+                  ? "#ffa502"
+                  : "var(--accent)";
+          } else {
+            el.textContent = player.paused() ? "paused" : "syncing…";
           }
 
           // Buffered ahead
@@ -767,13 +791,12 @@
         }
       }
 
-      // ── Web Audio VU meter ─────────────────────────────────────────────────────
       // Video.js has no built-in audio analyser, so we tap the <video> element
       // directly with the Web Audio API. Must be after a user gesture (play click).
       function initVU() {
         const videoEl =
-          document.getElementById("shopstream-player_html5_api") ??
-          document.querySelector("#shopstream-player video");
+          document.getElementById("broadcaststream-player_html5_api") ??
+          document.querySelector("#broadcaststream-player video");
         if (!videoEl || audioCtx) return;
 
         try {
@@ -840,7 +863,6 @@
           "Unmute in player to activate";
       }
 
-      // ── Active streams from API ────────────────────────────────────────────────
       async function fetchStreams() {
         const container = document.getElementById("streams-list");
         container.innerHTML = '<div class="empty-state">Loading…</div>';
@@ -885,7 +907,6 @@
         connectStream();
       }
 
-      // ── Helpers ────────────────────────────────────────────────────────────────
       function setStatus(state, text) {
         const pill = document.getElementById("status-pill");
         pill.className = state;
@@ -914,9 +935,6 @@
             })[c] ?? c,
         );
       }
-
-      // Auto-fetch streams on load
-      window.addEventListener("DOMContentLoaded", fetchStreams);
     </script>
   </body>
 </html>

@@ -11,6 +11,7 @@ STREAM_KEY="${RAW_PATH#live/}"
 
 echo "[on_unpublish] Stream ended: path=${RAW_PATH} key=${STREAM_KEY}"
 
+
 wget -qO- \
   --post-data="name=${STREAM_KEY}&remoteAddr=${REMOTE_ADDR}" \
   "http://api:4000/webhook/on-unpublish" \

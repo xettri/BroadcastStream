@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BroadcastStream — Go Live</title>
+    <meta
+      name="description"
+      content="Stream live from your browser or phone using WebRTC — no app required"
+    />
+
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0a0a0f;
+        --surface: #13131a;
+        --surface2: #1c1c26;
+        --border: #2a2a38;
+        --accent: #ff4757;
+        --accent2: #ff6b7a;
+        --green: #2ed573;
+        --red: #ff4757;
+        --text: #e8e8f0;
+        --muted: #6b6b80;
+        --radius: 12px;
+        --radius-sm: 8px;
+        --font: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+
+      body {
+        font-family: var(--font);
+        background: var(--bg);
+        color: var(--text);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 24px 16px;
+      }
+
+      header {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 32px;
+        width: 100%;
+        max-width: 760px;
+      }
+
+      .logo {
+        font-size: 1.5rem;
+        font-weight: 800;
+        background: linear-gradient(135deg, var(--accent), #ff7f8a);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        letter-spacing: -0.5px;
+      }
+
+      .badge {
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        background: var(--surface2);
+        color: var(--muted);
+        padding: 3px 8px;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+      }
+
+      .badge.live {
+        background: var(--accent);
+        color: white;
+        border-color: transparent;
+      }
+
+      .spacer {
+        flex: 1;
+      }
+
+      #live-timer {
+        font-size: 0.85rem;
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+        color: var(--accent);
+        display: none;
+      }
+
+      .main {
+        width: 100%;
+        max-width: 760px;
+        display: grid;
+        gap: 20px;
+      }
+
+      .preview-card {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16/9;
+        background: #000;
+        border-radius: var(--radius);
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+
+      #preview {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+        transform: scaleX(-1); /* Mirror for selfie view */
+      }
+
+      /* Overlay when camera not started */
+      #cam-overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background: rgba(10, 10, 15, 0.92);
+        transition: opacity 0.4s;
+      }
+
+      #cam-overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .cam-icon {
+        font-size: 3rem;
+        opacity: 0.5;
+      }
+
+      .cam-overlay-text {
+        font-size: 0.9rem;
+        color: var(--muted);
+        text-align: center;
+      }
+
+      /* LIVE indicator overlay on video */
+      #live-badge-overlay {
+        position: absolute;
+        top: 14px;
+        left: 14px;
+        display: none;
+        align-items: center;
+        gap: 6px;
+        background: var(--accent);
+        color: white;
+        font-size: 0.7rem;
+        font-weight: 800;
+        letter-spacing: 1.5px;
+        padding: 4px 10px;
+        border-radius: 4px;
+      }
+
+      #live-badge-overlay.visible {
+        display: flex;
+      }
+
+      .live-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: white;
+        animation: pulse 1.4s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+          opacity: 1;
+        }
+        50% {
+          transform: scale(1.4);
+          opacity: 0.7;
+        }
+      }
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.2;
+        }
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      /* Stats overlay */
+      #stats-overlay {
+        position: absolute;
+        bottom: 12px;
+        right: 12px;
+        display: none;
+        gap: 6px;
+        flex-direction: column;
+        align-items: flex-end;
+      }
+      #stats-overlay.visible {
+        display: flex;
+      }
+
+      .stat-badge {
+        background: rgba(0, 0, 0, 0.65);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(4px);
+        color: var(--text);
+        font-size: 0.7rem;
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-variant-numeric: tabular-nums;
+      }
+
+      .card {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 20px 24px;
+      }
+
+      .card-title {
+        font-size: 0.75rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        color: var(--muted);
+        margin-bottom: 16px;
+      }
+
+      .setup-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 14px;
+      }
+
+      @media (max-width: 540px) {
+        .setup-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+
+      .field label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+      }
+
+      .field input,
+      .field select {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        color: var(--text);
+        font-size: 0.9rem;
+        padding: 10px 14px;
+        outline: none;
+        transition: border-color 0.2s;
+        font-family: inherit;
+      }
+
+      .field input:focus,
+      .field select:focus {
+        border-color: var(--accent);
+      }
+      .field select {
+        cursor: pointer;
+      }
+
+      .cam-controls {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 4px;
+      }
+
+      .btn {
+        border: none;
+        border-radius: var(--radius-sm);
+        font-weight: 700;
+        font-size: 0.9rem;
+        cursor: pointer;
+        padding: 11px 22px;
+        transition: all 0.2s;
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        letter-spacing: 0.2px;
+      }
+
+      .btn:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, var(--accent), #e8354a);
+        color: white;
+        flex: 1;
+        justify-content: center;
+      }
+      .btn-primary:not(:disabled):hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px rgba(255, 71, 87, 0.35);
+      }
+
+      .btn-danger {
+        background: #3d1a1a;
+        color: var(--accent);
+        border: 1px solid rgba(255, 71, 87, 0.3);
+        flex: 1;
+        justify-content: center;
+      }
+      .btn-danger:not(:disabled):hover {
+        background: rgba(255, 71, 87, 0.15);
+      }
+
+      .btn-secondary {
+        background: var(--surface2);
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      .btn-secondary:not(:disabled):hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      /* Go Live button pulse when streaming */
+      @keyframes going-live {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.5);
+        }
+        50% {
+          box-shadow: 0 0 0 8px rgba(255, 71, 87, 0);
+        }
+      }
+
+      .btn-danger.pulsing {
+        animation: going-live 1.5s infinite;
+      }
+
+      .action-row {
+        display: flex;
+        gap: 10px;
+        margin-top: 16px;
+      }
+
+      #log {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 12px 14px;
+        font-family: "Courier New", monospace;
+        font-size: 0.78rem;
+        color: var(--muted);
+        min-height: 80px;
+        max-height: 140px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .log-line {
+        display: flex;
+        gap: 10px;
+      }
+      .log-time {
+        color: #3d3d55;
+        flex-shrink: 0;
+      }
+      .log-ok {
+        color: var(--green);
+      }
+      .log-err {
+        color: var(--accent);
+      }
+      .log-info {
+        color: var(--muted);
+      }
+
+      .tip-box {
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        border-radius: var(--radius-sm);
+        padding: 12px 16px;
+        font-size: 0.8rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+
+      .tip-box strong {
+        color: var(--text);
+      }
+
+      .viewer-link {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        background: var(--surface2);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 10px 14px;
+        font-size: 0.82rem;
+        color: var(--muted);
+      }
+
+      .viewer-link a {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .viewer-link a:hover {
+        text-decoration: underline;
+      }
+
+      #copy-btn {
+        margin-left: auto;
+        font-size: 0.75rem;
+        background: var(--surface);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 4px 10px;
+        cursor: pointer;
+        font-family: inherit;
+        transition: all 0.2s;
+      }
+      #copy-btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+
+      #https-warning {
+        display: none;
+        background: #2d1500;
+        border: 1px solid #ff8c00;
+        border-left: 4px solid #ff8c00;
+        border-radius: var(--radius-sm);
+        padding: 14px 18px;
+        font-size: 0.85rem;
+        line-height: 1.6;
+        color: #ffc97a;
+        margin-bottom: 4px;
+      }
+      #https-warning strong {
+        color: #ffaa33;
+      }
+      #https-warning code {
+        background: rgba(255, 140, 0, 0.15);
+        padding: 1px 5px;
+        border-radius: 3px;
+        font-family: monospace;
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <div class="logo">BroadcastStream</div>
+      <div class="badge" id="go-live-badge">BROADCASTER</div>
+      <div class="spacer"></div>
+      <span id="live-timer">⬤ 00:00:00</span>
+    </header>
+
+    <div class="main">
+      <!--  Secure-context warning (hidden unless camera API unavailable) -->
+      <div id="https-warning">
+        ⚠️ <strong>Camera unavailable</strong> —
+        <code>getUserMedia</code> requires a <strong>secure context</strong>.
+        Browsers block camera access on plain HTTP except for
+        <code>localhost</code>.<br />
+        <strong>Fix options:</strong><br />
+        &bull; Open via
+        <code>http://localhost:8080/broadcaster.html</code> (serve through
+        NGINX).<br />
+        &bull; Add NGINX to serve <code>public/</code> on HTTPS with a
+        self-signed cert.<br />
+        &bull; On Chrome only: flag
+        <code>chrome://flags/#unsafely-treat-insecure-origin-as-secure</code> →
+        add your IP.<br />
+        &bull; Use a reverse proxy with a valid TLS cert (Cloudflare Tunnel /
+        ngrok).
+      </div>
+
+      <div class="preview-card">
+        <video id="preview" autoplay muted playsinline></video>
+
+        <div id="cam-overlay">
+          <div class="cam-icon">📷</div>
+          <div class="cam-overlay-text">
+            Click "Open Camera" to preview your stream
+          </div>
+        </div>
+
+        <div id="live-badge-overlay">
+          <div class="live-dot"></div>
+          LIVE
+        </div>
+
+        <div id="stats-overlay">
+          <span class="stat-badge" id="stat-conn">● Connected</span>
+          <span class="stat-badge" id="stat-res">—</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Stream Setup</div>
+
+        <div class="setup-grid">
+          <div class="field">
+            <label for="server-url">WebRTC Server (WHIP)</label>
+            <input
+              id="server-url"
+              type="text"
+              placeholder="http://localhost:8889"
+            />
+          </div>
+          <div class="field">
+            <label for="stream-key-input">Stream Key</label>
+            <input
+              id="stream-key-input"
+              type="text"
+              value="webcam"
+              placeholder="webcam"
+            />
+          </div>
+          <div class="field">
+            <label for="camera-select">Camera</label>
+            <select id="camera-select">
+              <option value="">— select camera —</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="quality-select">Quality</label>
+            <select id="quality-select">
+              <option value="1080">1080p (4.5 Mbps)</option>
+              <option value="720" selected>720p (2.5 Mbps)</option>
+              <option value="480">480p (1.2 Mbps)</option>
+              <option value="360">360p (0.6 Mbps)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="cam-controls" style="margin-top: 16px">
+          <button
+            class="btn btn-secondary"
+            id="btn-camera"
+            onclick="openCamera()"
+          >
+            📷 Open Camera
+          </button>
+          <button
+            class="btn btn-secondary"
+            id="btn-flip"
+            onclick="flipCamera()"
+            disabled
+          >
+            🔄 Flip
+          </button>
+          <button
+            class="btn btn-secondary"
+            id="btn-mic"
+            onclick="toggleMic()"
+            disabled
+          >
+            🎙 Mic: On
+          </button>
+        </div>
+
+        <div class="action-row">
+          <button
+            class="btn btn-primary"
+            id="btn-golive"
+            onclick="goLive()"
+            disabled
+          >
+            ⬤ Go Live
+          </button>
+          <button
+            class="btn btn-danger"
+            id="btn-stop"
+            onclick="stopLive()"
+            style="display: none"
+          >
+            ■ End Stream
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Status</div>
+        <div id="log"></div>
+      </div>
+
+      <div class="viewer-link" id="viewer-link-row" style="display: none">
+        📺 Share viewer link:
+        <a id="viewer-url-link" href="viewer.html" target="_blank"
+          >viewer.html</a
+        >
+        <button id="copy-btn" onclick="copyViewerUrl()">Copy URL</button>
+      </div>
+
+      <div class="tip-box">
+        <strong>📱 Streaming from a phone?</strong> Open this page on your phone
+        browser (Chrome Android / Safari iOS). Tap Open Camera → Go Live. Your
+        phone camera streams directly to the server via WebRTC — no app download
+        required.<br /><br />
+        <strong>🎥 Using OBS instead?</strong> RTMP also works: Server:
+        <code>rtmp://localhost:1935/live</code> · Key: any
+      </div>
+    </div>
+
+    <script>
+      let localStream = null; // MediaStream from getUserMedia
+      let pc = null; // RTCPeerConnection for WebRTC/WHIP signaling
+      let facingMode = "user"; // Camera orientation (front/rear)
+      let micOn = true;
+      let liveStart = null;
+      let timerInterval = null;
+      let flipAvailable = false; // Set to true if multiple cameras are detected
+
+      function log(msg, type = "info") {
+        const box = document.getElementById("log");
+        const now = new Date().toTimeString().slice(0, 8);
+        const line = document.createElement("div");
+        line.className = "log-line";
+        line.innerHTML = `<span class="log-time">${now}</span><span class="log-${type}">${msg}</span>`;
+        box.appendChild(line);
+        box.scrollTop = box.scrollHeight;
+      }
+
+      async function enumCameras() {
+        if (!navigator.mediaDevices) return;
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const cams = devices.filter((d) => d.kind === "videoinput");
+          const sel = document.getElementById("camera-select");
+          sel.innerHTML = "";
+          cams.forEach((cam, i) => {
+            const opt = document.createElement("option");
+            opt.value = cam.deviceId;
+            opt.textContent = cam.label || `Camera ${i + 1}`;
+            sel.appendChild(opt);
+          });
+          flipAvailable = cams.length > 1;
+          document.getElementById("btn-flip").disabled = !flipAvailable;
+          log(`Found ${cams.length} camera(s)`, "ok");
+        } catch (e) {
+          log(`Camera enumeration failed: ${e.message}`, "err");
+        }
+      }
+
+      async function openCamera() {
+        // Guard: getUserMedia is only available in secure contexts (HTTPS / localhost)
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          document.getElementById("https-warning").style.display = "block";
+          log(
+            "Camera API unavailable — page must be served over HTTPS or localhost",
+            "err",
+          );
+          log("See the warning box above for fix options", "err");
+          return;
+        }
+
+        if (localStream) {
+          localStream.getTracks().forEach((t) => t.stop());
+        }
+
+        const quality = parseInt(
+          document.getElementById("quality-select").value,
+        );
+        const deviceId = document.getElementById("camera-select").value;
+        const camConstraint = deviceId
+          ? { deviceId: { exact: deviceId } }
+          : { facingMode };
+
+        // Resolution presets
+        const resMap = {
+          1080: [1920, 1080],
+          720: [1280, 720],
+          480: [854, 480],
+          360: [640, 360],
+        };
+        const [w, h] = resMap[quality] ?? [1280, 720];
+
+        log(`Opening camera at ${w}×${h}…`);
+
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              ...camConstraint,
+              width: { ideal: w },
+              height: { ideal: h },
+              frameRate: { ideal: 30 },
+            },
+            audio: micOn,
+          });
+
+          document.getElementById("preview").srcObject = localStream;
+          document.getElementById("cam-overlay").classList.add("hidden");
+          document.getElementById("btn-camera").textContent =
+            "🔄 Restart Camera";
+          document.getElementById("btn-mic").disabled = false;
+          document.getElementById("btn-golive").disabled = false;
+          document.getElementById("btn-flip").disabled = !flipAvailable;
+
+          // Show actual resolution
+          const vt = localStream.getVideoTracks()[0];
+          const settings = vt.getSettings();
+          document.getElementById("stat-res").textContent =
+            `${settings.width}×${settings.height}`;
+
+          // Refresh camera list with labels (requires permission first)
+          await enumCameras();
+
+          log(`Camera ready: ${vt.label}`, "ok");
+        } catch (e) {
+          log(`Camera error: ${e.message}`, "err");
+          if (e.name === "NotAllowedError") {
+            log(
+              "Please allow camera/microphone permission and try again",
+              "err",
+            );
+          }
+        }
+      }
+
+      async function flipCamera() {
+        facingMode = facingMode === "user" ? "environment" : "user";
+        document.getElementById("camera-select").value = ""; // clear device selection
+        log(`Switching to ${facingMode === "user" ? "front" : "rear"} camera…`);
+        await openCamera();
+      }
+
+      function toggleMic() {
+        if (!localStream) return;
+        micOn = !micOn;
+        localStream.getAudioTracks().forEach((t) => {
+          t.enabled = micOn;
+        });
+        document.getElementById("btn-mic").textContent = micOn
+          ? "🎙 Mic: On"
+          : "🔇 Mic: Off";
+        log(`Microphone ${micOn ? "unmuted" : "muted"}`);
+      }
+
+      // WHIP = WebRTC HTTP Ingest Protocol (draft-ietf-wish-whip)
+      // Browser sends an SDP offer via HTTP POST; server replies with SDP answer.
+      // MediaMTX's WHIP endpoint: POST /live/{key}/whip
+      async function goLive() {
+        if (!localStream) {
+          log("Open camera first", "err");
+          return;
+        }
+
+        const server = document
+          .getElementById("server-url")
+          .value.trim()
+          .replace(/\/$/, "");
+        const key = document.getElementById("stream-key-input").value.trim();
+        if (!key) {
+          log("Enter a stream key", "err");
+          return;
+        }
+
+        const whipUrl = `${server}/${key}/whip`;
+        log(`Connecting to WHIP endpoint: ${whipUrl}…`);
+
+        try {
+          // Create peer connection with STUN for ICE
+          pc = new RTCPeerConnection({
+            iceServers: [
+              { urls: "stun:stun.l.google.com:19302" },
+              { urls: "stun:stun1.l.google.com:19302" },
+            ],
+          });
+
+          // Add all local tracks to the peer connection
+          localStream.getTracks().forEach((track) => {
+            pc.addTrack(track, localStream);
+            log(`Added ${track.kind} track: ${track.label}`);
+          });
+
+          // ICE state monitoring
+          pc.oniceconnectionstatechange = () => {
+            const s = pc.iceConnectionState;
+            log(
+              `ICE: ${s}`,
+              s === "connected" ? "ok" : s === "failed" ? "err" : "info",
+            );
+            if (s === "connected") onStreamLive(key);
+            if (s === "failed") {
+              log("ICE failed — check network", "err");
+              stopLive();
+            }
+          };
+
+          // Create SDP offer
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+
+          // Wait for ICE candidates to gather (trickle-ice needs time)
+          log("Gathering ICE candidates…");
+          await waitForIceGathering(pc);
+
+          // POST SDP offer to the WHIP endpoint
+          log("Sending SDP offer to server…");
+          const resp = await fetch(whipUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/sdp" },
+            body: pc.localDescription.sdp,
+          });
+
+          if (!resp.ok) {
+            const body = await resp.text();
+            throw new Error(`WHIP ${resp.status}: ${body.slice(0, 120)}`);
+          }
+
+          // Apply SDP answer from server
+          const answerSdp = await resp.text();
+          await pc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+          log("SDP exchange complete — establishing connection…", "ok");
+        } catch (e) {
+          log(`Go Live failed: ${e.message}`, "err");
+          stopLive();
+        }
+      }
+
+      // Wait for ICE gathering to complete (or timeout after 3s)
+      function waitForIceGathering(pc) {
+        return new Promise((resolve) => {
+          if (pc.iceGatheringState === "complete") {
+            resolve();
+            return;
+          }
+          const timeout = setTimeout(resolve, 3000); // 3s timeout
+          pc.onicegatheringstatechange = () => {
+            if (pc.iceGatheringState === "complete") {
+              clearTimeout(timeout);
+              resolve();
+            }
+          };
+        });
+      }
+
+      function onStreamLive(key) {
+        liveStart = Date.now();
+        document.getElementById("go-live-badge").className = "badge live";
+        document.getElementById("go-live-badge").textContent = "LIVE";
+        document.getElementById("live-badge-overlay").classList.add("visible");
+        document.getElementById("stats-overlay").classList.add("visible");
+        document.getElementById("live-timer").style.display = "";
+        document.getElementById("btn-golive").style.display = "none";
+        document.getElementById("btn-stop").style.display = "";
+        document.getElementById("btn-stop").classList.add("pulsing");
+
+        // Show viewer link
+        const viewerBase = window.location.href.replace(
+          "broadcaster.html",
+          "viewer.html",
+        );
+        const viewerUrl = `${viewerBase}#key=${encodeURIComponent(key)}`;
+        document.getElementById("viewer-url-link").href = "viewer.html";
+        document.getElementById("viewer-url-link").textContent =
+          `viewer.html (key: ${key})`;
+        document.getElementById("viewer-link-row").style.display = "";
+
+        timerInterval = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - liveStart) / 1000);
+          const h = String(Math.floor(elapsed / 3600)).padStart(2, "0");
+          const m = String(Math.floor((elapsed % 3600) / 60)).padStart(2, "0");
+          const s = String(elapsed % 60).padStart(2, "0");
+          document.getElementById("live-timer").textContent =
+            `⬤ ${h}:${m}:${s}`;
+        }, 1000);
+
+        log(`🎉 You are LIVE! Stream key: ${key}`, "ok");
+      }
+
+      function stopLive() {
+        if (pc) {
+          pc.close();
+          pc = null;
+        }
+        if (timerInterval) {
+          clearInterval(timerInterval);
+          timerInterval = null;
+        }
+
+        document.getElementById("go-live-badge").className = "badge";
+        document.getElementById("go-live-badge").textContent = "BROADCASTER";
+        document
+          .getElementById("live-badge-overlay")
+          .classList.remove("visible");
+        document.getElementById("stats-overlay").classList.remove("visible");
+        document.getElementById("live-timer").style.display = "none";
+        document.getElementById("btn-golive").style.display = "";
+        document.getElementById("btn-golive").disabled = !localStream;
+        document.getElementById("btn-stop").style.display = "none";
+        document.getElementById("btn-stop").classList.remove("pulsing");
+        document.getElementById("viewer-link-row").style.display = "none";
+
+        log("Stream ended", "info");
+      }
+
+      function copyViewerUrl() {
+        const key = document.getElementById("stream-key-input").value.trim();
+        const base = window.location.href
+          .split("?")[0]
+          .split("#")[0]
+          .replace("broadcaster.html", "viewer.html");
+        const url = `${base}?key=${encodeURIComponent(key)}`;
+
+        navigator.clipboard.writeText(url).then(() => {
+          const btn = document.getElementById("copy-btn");
+          btn.textContent = "Copied!";
+          setTimeout(() => {
+            btn.textContent = "Copy URL";
+          }, 2000);
+        });
+      }
+
+      window.addEventListener("DOMContentLoaded", () => {
+        // Automatically point to the unified gateway
+        document.getElementById("server-url").value =
+          window.location.origin + "/ingest";
+
+        log("BroadcastStream broadcaster ready", "ok");
+
+        // Check for secure context immediately and warn if camera API missing
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          document.getElementById("https-warning").style.display = "block";
+          document.getElementById("btn-camera").disabled = true;
+          document.getElementById("btn-golive").disabled = true;
+          log(
+            "Camera unavailable — not a secure context (need HTTPS or localhost)",
+            "err",
+          );
+          return;
+        }
+
+        log('Click "Open Camera" to begin', "info");
+
+        // Trigger camera enum (without permission — labels blank until camera opened)
+        navigator.mediaDevices
+          .enumerateDevices()
+          .then((devices) => {
+            const count = devices.filter((d) => d.kind === "videoinput").length;
+            if (count > 0) {
+              document.getElementById("camera-select").innerHTML =
+                `<option value="">Default Camera (${count} available)</option>`;
+              flipAvailable = count > 1;
+            }
+          })
+          .catch(() => {});
+      });
+    </script>
+  </body>
+</html>

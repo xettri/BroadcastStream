@@ -1,5 +1,5 @@
 /**
- * Shared TypeScript types for the ShopStream API.
+ * Shared TypeScript types for the BroadcastStream API.
  */
 
 /** Represents a single active live stream */

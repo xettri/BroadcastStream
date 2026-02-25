@@ -1,11 +1,5 @@
 #!/bin/sh
-# transcode.sh — ABR Low-Latency HLS Transcoder
-#
-# Uses /bin/sh — the MediaMTX image is Alpine Linux which has no bash.
-#
-# Arguments:
-#   $1 — RTSP_PATH: full path for RTSP pull (e.g. "live/test")
-#   $2 — STREAM_KEY: clean output folder key (e.g. "test")
+# ABR Low-Latency HLS Transcoder
 
 set -eu
 
@@ -22,6 +16,9 @@ OUT_DIR="${HLS_ROOT}/${STREAM_KEY}"
 
 echo "[transcode] Starting: key=${STREAM_KEY} input=${RTSP_INPUT}"
 
+# Clear any old cache for this stream key
+rm -rf "${OUT_DIR}"
+
 # Create per-quality output directories
 mkdir -p \
   "${OUT_DIR}/1080p" \
@@ -29,9 +26,7 @@ mkdir -p \
   "${OUT_DIR}/480p"  \
   "${OUT_DIR}/360p"
 
-# Write ABR master playlist explicitly.
-# FFmpeg does NOT auto-generate this for multi-output HLS.
-# BANDWIDTH values = video bitrate + audio bitrate (in bps).
+# Write ABR master playlist explicitly (HLS variant manifest)
 cat > "${OUT_DIR}/master.m3u8" << 'EOF'
 #EXTM3U
 #EXT-X-VERSION:3
@@ -47,7 +42,7 @@ EOF
 
 echo "[transcode] master.m3u8 written to ${OUT_DIR}"
 
-# Run FFmpeg: single-pass 4-rendition ABR HLS output
+# Run FFmpeg: 4-rendition ABR HLS output with 1s segments for low latency
 ffmpeg \
   -hide_banner \
   -loglevel warning \
@@ -62,34 +57,38 @@ ffmpeg \
      [v4]scale=640:360:flags=lanczos[v4out]"   \
   -map "[v1out]" -map "a:0" \
     -c:v:0 libx264 -preset ultrafast -tune zerolatency \
-    -b:v:0 4500k -maxrate:v:0 4950k -bufsize:v:0 9000k \
+    -r 30 -g 30 -sc_threshold 0 \
+    -b:v:0 0 -crf 23 -maxrate:v:0 4500k -bufsize:v:0 8000k \
     -c:a:0 aac -b:a:0 192k -ar 48000 \
-    -f hls -hls_time 1 -hls_list_size 6 \
-    -hls_flags "delete_segments+independent_segments" \
+    -f hls -hls_time 1 -hls_list_size 10 \
+    -hls_flags "delete_segments+independent_segments+append_list" \
     -hls_segment_filename "${OUT_DIR}/1080p/%04d.ts" \
     "${OUT_DIR}/1080p/index.m3u8" \
   -map "[v2out]" -map "a:0" \
     -c:v:1 libx264 -preset ultrafast -tune zerolatency \
-    -b:v:1 2500k -maxrate:v:1 2750k -bufsize:v:1 5000k \
+    -r 30 -g 30 -sc_threshold 0 \
+    -b:v:1 0 -crf 23 -maxrate:v:1 2500k -bufsize:v:1 5000k \
     -c:a:1 aac -b:a:1 128k -ar 48000 \
-    -f hls -hls_time 1 -hls_list_size 6 \
-    -hls_flags "delete_segments+independent_segments" \
+    -f hls -hls_time 1 -hls_list_size 10 \
+    -hls_flags "delete_segments+independent_segments+append_list" \
     -hls_segment_filename "${OUT_DIR}/720p/%04d.ts" \
     "${OUT_DIR}/720p/index.m3u8" \
   -map "[v3out]" -map "a:0" \
     -c:v:2 libx264 -preset ultrafast -tune zerolatency \
-    -b:v:2 1200k -maxrate:v:2 1320k -bufsize:v:2 2400k \
+    -r 30 -g 30 -sc_threshold 0 \
+    -b:v:2 0 -crf 23 -maxrate:v:2 1200k -bufsize:v:2 2400k \
     -c:a:2 aac -b:a:2 96k -ar 48000 \
-    -f hls -hls_time 1 -hls_list_size 6 \
-    -hls_flags "delete_segments+independent_segments" \
+    -f hls -hls_time 1 -hls_list_size 10 \
+    -hls_flags "delete_segments+independent_segments+append_list" \
     -hls_segment_filename "${OUT_DIR}/480p/%04d.ts" \
     "${OUT_DIR}/480p/index.m3u8" \
   -map "[v4out]" -map "a:0" \
     -c:v:3 libx264 -preset ultrafast -tune zerolatency \
-    -b:v:3 600k -maxrate:v:3 660k -bufsize:v:3 1200k \
+    -r 30 -g 30 -sc_threshold 0 \
+    -b:v:3 0 -crf 23 -maxrate:v:3 600k -bufsize:v:3 1200k \
     -c:a:3 aac -b:a:3 64k -ar 48000 \
-    -f hls -hls_time 1 -hls_list_size 6 \
-    -hls_flags "delete_segments+independent_segments" \
+    -f hls -hls_time 1 -hls_list_size 10 \
+    -hls_flags "delete_segments+independent_segments+append_list" \
     -hls_segment_filename "${OUT_DIR}/360p/%04d.ts" \
     "${OUT_DIR}/360p/index.m3u8"
 

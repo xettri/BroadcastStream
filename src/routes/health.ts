@@ -15,7 +15,7 @@ router.get('/', (_req: Request, res: Response): void => {
     success: true,
     data: {
       status: 'ok',
-      service: 'shopstream-api',
+      service: 'broadcaststream-api',
       version: '1.0.0',
       uptime: Math.floor(process.uptime()),
       activeStreams: streamCount(),
