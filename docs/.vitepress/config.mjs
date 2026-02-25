@@ -1,6 +1,7 @@
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
+  base: "/broadcaststream/",
   title: "BroadcastStream",
   description:
     "A production-ready WebRTC & HLS low-latency streaming infrastructure",
